@@ -1,0 +1,129 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ItemStage {
+  CAPTURED
+  CLEANED
+  COMPLETED
+  CANCELLED
+}
+
+enum ProjectStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum GoalStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+  items     Item[]
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  targetDate  DateTime?
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  items       Item[]
+  envelopes   Envelope[]
+  goals       ProjectGoal[]
+}
+
+model Goal {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  status      GoalStatus    @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  items       ItemGoal[]
+  envelopes   Envelope[]
+  projects    ProjectGoal[]
+}
+
+model ProjectGoal {
+  projectId String
+  goalId    String
+  project   Project @relation(fields: [projectId], references: [id])
+  goal      Goal    @relation(fields: [goalId], references: [id])
+
+  @@id([projectId, goalId])
+}
+
+model ItemGoal {
+  itemId String
+  goalId String
+  item   Item @relation(fields: [itemId], references: [id])
+  goal   Goal @relation(fields: [goalId], references: [id])
+
+  @@id([itemId, goalId])
+}
+
+model Envelope {
+  id        String          @id @default(cuid())
+  name      String
+  projectId String?
+  goalId    String?
+  project   Project?        @relation(fields: [projectId], references: [id])
+  goal      Goal?           @relation(fields: [goalId], references: [id])
+  createdAt DateTime        @default(now())
+  topUps    EnvelopeTopUp[]
+  items     Item[]
+}
+
+model EnvelopeTopUp {
+  id         String   @id @default(cuid())
+  envelopeId String
+  envelope   Envelope @relation(fields: [envelopeId], references: [id])
+  amount     Decimal
+  date       DateTime @default(now())
+  note       String?
+}
+
+model ReminderSchedule {
+  id      String @id @default(cuid())
+  name    String @unique
+  offsets Int[]
+  items   Item[]
+}
+
+model Item {
+  id                 String            @id @default(cuid())
+  name               String
+  link               String?
+  stage              ItemStage         @default(CAPTURED)
+  suggestedCategory  String?
+  categoryId         String?
+  category           Category?         @relation(fields: [categoryId], references: [id])
+  projectId          String?
+  project            Project?          @relation(fields: [projectId], references: [id])
+  envelopeId         String?
+  envelope           Envelope?         @relation(fields: [envelopeId], references: [id])
+  reminderScheduleId String?
+  reminderSchedule   ReminderSchedule? @relation(fields: [reminderScheduleId], references: [id])
+  plannedPrice       Decimal?
+  actualPrice        Decimal?
+  targetDate         DateTime?
+  goals              ItemGoal[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}

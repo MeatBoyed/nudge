@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+    depends_on:
+      - db
+    # Dokploy routes via its own proxy; domain/SSL configured in the Dokploy UI
+    # or via labels here once confirmed against Dokploy's current docs.
+  db:
+    image: postgres:16-alpine
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
