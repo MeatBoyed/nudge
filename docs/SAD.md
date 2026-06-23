@@ -36,10 +36,10 @@ One app container, one DB container. No queue, no cache layer, no separate worke
 
 ## 3. Authentication
 
-- `POST /api/auth/login` — body `{ passphrase }`, compared against a bcrypt hash via `bcryptjs` (no native compile step, unlike `bcrypt`, which matters for a small Alpine image). On match, issues a signed, httpOnly, `SameSite=Lax` cookie (JWT via `jose`, signed with `SESSION_SECRET`), ~30-day expiry.
+- `POST /api/auth/login` — body `{ passphrase }`, compared directly against the plain-text `APP_PASSPHRASE` env var. On match, issues a signed, httpOnly, `SameSite=Lax` cookie (JWT via `jose`, signed with `SESSION_SECRET`), ~30-day expiry.
 - `proxy.ts` — validates the cookie on every request except `/login` and `/api/auth/login`; redirects to `/login` if missing/invalid.
 - No per-user records — "authenticated" is a single boolean fact, not tied to an identity.
-- The passphrase hash is stored as `APP_PASSPHRASE_HASH_B64` — the bcrypt hash **base64-encoded**, not raw. A raw bcrypt hash is full of literal `$` characters (its field separator), and Next.js's built-in `.env` loader does shell-style `$VAR` interpolation on values it parses directly (e.g. for `next dev`/`next build` on the host) — it will silently mangle an unescaped hash into an empty string. Base64 has no `$` in its alphabet, so encoding sidesteps this (and any other env-file parser's quirks) entirely rather than relying on fragile escaping. See `src/lib/auth.ts`.
+- `APP_PASSPHRASE` is stored in plain text, not hashed. Deliberate simplicity tradeoff: set-and-restart with no generation step, at the cost of the passphrase being readable if `.env` ever leaks. An earlier version stored a base64-encoded bcrypt hash instead (avoiding that exposure, and incidentally side-stepping a real gotcha where Next.js's `.env` loader does shell-style `$VAR` interpolation and mangles a raw bcrypt hash's literal `$` characters) — reverted in favor of plain text per explicit user preference. If this ever needs revisiting, see git history for `src/lib/auth.ts`.
 
 ## 4. Data Model
 
@@ -311,7 +311,7 @@ volumes:
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Postgres connection string. `localhost` for host-side `npm run dev`; the `app` service in both Compose files overrides this to use the `db` service name via `environment:`, since the value in `.env` can't serve both contexts at once. |
-| `APP_PASSPHRASE_HASH_B64` | Base64-encoded bcrypt hash of the shared passphrase (see §3 for why base64) |
+| `APP_PASSPHRASE` | The shared passphrase, plain text (see §3) |
 | `SESSION_SECRET` | Signing key for the session cookie |
 | `ANTHROPIC_API_KEY` | Used by the category-suggestion call |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Read by the `postgres` image itself; also substituted into the `app` service's `DATABASE_URL` override above |
