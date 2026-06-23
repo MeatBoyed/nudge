@@ -2,6 +2,8 @@ services:
   app:
     build: .
     env_file: .env
+    ports:
+      - "0.0.0.0:3015:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
     depends_on:
