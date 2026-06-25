@@ -23,7 +23,7 @@ The user juggles recurring and one-off household purchases/tasks (groceries, mov
 
 ## 4. Non-Objectives (v1)
 
-- No multi-user/roles — single shared passphrase, one household.
+- No multi-user/roles — single household, no accounts.
 - No price comparison / "find the best deal" across retailers (v2).
 - No push/email notifications — in-app only.
 - No native mobile app — responsive web only.
@@ -119,7 +119,7 @@ This is deliberately the simplest version of envelope budgeting that supports th
 
 - Self-hosted by the user — favor simplicity and low resource use over horizontal scalability.
 - **Deployment**: two Docker Compose files — one for plain `docker compose up` on any Docker host, one for Dokploy — kept as close to identical as possible (differences expected to be limited to networking/reverse-proxy labels, not service definitions). Finalized in the SAD.
-- Single shared passphrase auth; no account system, password resets, or email flows.
+- No auth/account system — not internet-exposed without a network-level access control of the user's choosing (e.g. a VPN or the host's reverse proxy).
 - Mobile-responsive (phone browser is a primary capture surface); no PWA/offline requirement in v1.
 - Data correctness for one household's data, not multi-tenant scale.
 

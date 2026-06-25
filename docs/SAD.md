@@ -11,7 +11,7 @@ Implements [PRD.md](./PRD.md). Decisions here resolve the two open assumptions f
 | Database | PostgreSQL | Relational fit for the Item/Project/Goal/Envelope graph; native array type useful for ReminderSchedule offsets. |
 | ORM | Prisma 7, via `@prisma/adapter-pg` driver adapter | Type-safe schema + migrations, low ceremony for a single-developer project. Prisma 7 has no Rust query-engine binary — the adapter talks to Postgres directly via `pg`, which also removes the old Alpine/openssl binary-mismatch failure mode entirely. |
 | AI | Anthropic API, `claude-haiku-4-5` | Cheap/fast model, sufficient for a one-shot category suggestion from a name + link. |
-| Auth | Custom single-passphrase + signed cookie | No multi-user requirement; a full auth library (NextAuth, etc.) is unneeded weight. |
+| Auth | None | Single-household tool; not exposed to the internet without the user's own network-level access control (VPN, reverse-proxy auth, etc.). An earlier version had a passphrase gate (`proxy.ts` + signed cookie) — removed as unnecessary friction. See git history for `src/lib/auth.ts` if this ever needs revisiting. |
 | Deployment | Docker Compose (native + Dokploy variants) | Self-hosted on the user's own Dokploy instance, not Vercel. |
 
 ## 2. High-Level Architecture
@@ -23,9 +23,6 @@ Browser (desktop/phone)
 Next.js app (single container)
    ├─ App Router pages (dashboard, inbox, calendar, project/goal/envelope detail)
    ├─ Server Actions / Route Handlers (mutations, queries)
-   ├─ proxy.ts — passphrase-session gate on every request (Next 16 renamed
-   │  "Middleware" to "Proxy"; it now defaults to the Node.js runtime, not
-   │  Edge, so there's no Edge-compatibility constraint on what it can import)
    └─ lib/ai — outbound call to Anthropic API (category suggestion)
    │
    ▼
@@ -36,10 +33,7 @@ One app container, one DB container. No queue, no cache layer, no separate worke
 
 ## 3. Authentication
 
-- `POST /api/auth/login` — body `{ passphrase }`, compared directly against the plain-text `APP_PASSPHRASE` env var. On match, issues a signed, httpOnly, `SameSite=Lax` cookie (JWT via `jose`, signed with `SESSION_SECRET`), ~30-day expiry.
-- `proxy.ts` — validates the cookie on every request except `/login` and `/api/auth/login`; redirects to `/login` if missing/invalid.
-- No per-user records — "authenticated" is a single boolean fact, not tied to an identity.
-- `APP_PASSPHRASE` is stored in plain text, not hashed. Deliberate simplicity tradeoff: set-and-restart with no generation step, at the cost of the passphrase being readable if `.env` ever leaks. An earlier version stored a base64-encoded bcrypt hash instead (avoiding that exposure, and incidentally side-stepping a real gotcha where Next.js's `.env` loader does shell-style `$VAR` interpolation and mangles a raw bcrypt hash's literal `$` characters) — reverted in favor of plain text per explicit user preference. If this ever needs revisiting, see git history for `src/lib/auth.ts`.
+None. The app has no login, session, or passphrase gate — every request is treated as the household's single user. If this is ever exposed beyond a trusted local network, put it behind a VPN or the reverse proxy's own access control rather than re-adding app-level auth.
 
 ## 4. Data Model
 
@@ -215,9 +209,7 @@ nudge/
 ├── prisma.config.ts              # Prisma 7: datasource URL + seed command live here
 ├── generated/prisma/             # generated client output (gitignored, regenerated on build)
 ├── src/
-│   ├── proxy.ts                  # passphrase-session gate (formerly middleware.ts)
 │   ├── app/
-│   │   ├── login/page.tsx
 │   │   ├── (dashboard)/
 │   │   │   ├── layout.tsx      # shared nav
 │   │   │   ├── page.tsx        # Inbox count (stub; Upcoming/Overdue not yet implemented)
@@ -228,12 +220,10 @@ nudge/
 │   │   │   ├── envelopes/[id]/page.tsx
 │   │   │   └── items/[id]/page.tsx
 │   │   └── api/
-│   │       ├── auth/login/route.ts
 │   │       └── items/route.ts  # capture only; clean/complete/cancel not yet built
 │   ├── components/ui/           # shadcn generated
 │   └── lib/
 │       ├── db.ts                 # Prisma client singleton (PrismaPg adapter)
-│       ├── auth.ts               # session sign/verify + passphrase check
 │       └── ai/suggestCategory.ts
 ├── Dockerfile
 ├── docker-compose.yml            # native Docker
@@ -243,7 +233,7 @@ nudge/
 └── .env                          # local dev only, gitignored
 ```
 
-The detail pages and dashboard above are intentionally **stubs that prove the DB/auth/Prisma wiring end-to-end** — they render real data (e.g. live Inbox count) but the Clean/Complete/Cancel flows, calendar rendering, and reminder/envelope-balance computations described in §4.3 and §7 are not yet implemented. That's the next slice of work, not part of this scaffold.
+The detail pages and dashboard above are intentionally **stubs that prove the DB/Prisma wiring end-to-end** — they render real data (e.g. live Inbox count) but the Clean/Complete/Cancel flows, calendar rendering, and reminder/envelope-balance computations described in §4.3 and §7 are not yet implemented. That's the next slice of work, not part of this scaffold.
 
 ## 7. Key Server Operations
 
@@ -311,8 +301,6 @@ volumes:
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Postgres connection string. `localhost` for host-side `npm run dev`; the `app` service in both Compose files overrides this to use the `db` service name via `environment:`, since the value in `.env` can't serve both contexts at once. |
-| `APP_PASSPHRASE` | The shared passphrase, plain text (see §3) |
-| `SESSION_SECRET` | Signing key for the session cookie |
 | `ANTHROPIC_API_KEY` | Used by the category-suggestion call |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Read by the `postgres` image itself; also substituted into the `app` service's `DATABASE_URL` override above |
 
@@ -326,5 +314,5 @@ volumes:
 1. **Dokploy compose labels** (§8.3) — placeholder until first deploy confirms exact routing config against Dokploy's current version.
 2. **Fire-and-forget AI call** (§5) — acceptable for v1 single-user load; if it ever needs retries/observability, this is the first place a small job table would get introduced.
 3. **OG-tag link enrichment** (PRD stretch goal) — no architecture committed yet; would add a server-side fetch+parse step on link entry, cached on the Item row, if pursued.
-4. **Docker build unverified end-to-end in dev.** `npm run dev` and `npm run build` are fully verified (auth flow, item capture, AI fire-and-forget, Prisma migrations/seed all tested live against a real Postgres container). The actual `docker build`/`docker compose up --build` could not be completed in the sandbox this was scaffolded in — `npm ci` inside any container there reliably hit `ECONNRESET` under connection concurrency (diagnosed: DNS resolution and single large sustained downloads both worked fine; only `npm ci`'s many-concurrent-connection fetch pattern failed, consistently, across 6+ attempts with different mitigations). This looks like a sandbox-specific Docker networking limitation, not a defect in the Dockerfile, but **the actual containerized boot sequence (image build, `prisma migrate deploy` on start, app serving traffic from inside a container) has not been observed working.** Verify this on a real Docker host (e.g. the target Dokploy server) before relying on it.
+4. **Docker build unverified end-to-end in dev.** `npm run dev` and `npm run build` are fully verified (item capture, AI fire-and-forget, Prisma migrations/seed all tested live against a real Postgres container). The actual `docker build`/`docker compose up --build` could not be completed in the sandbox this was scaffolded in — `npm ci` inside any container there reliably hit `ECONNRESET` under connection concurrency (diagnosed: DNS resolution and single large sustained downloads both worked fine; only `npm ci`'s many-concurrent-connection fetch pattern failed, consistently, across 6+ attempts with different mitigations). This looks like a sandbox-specific Docker networking limitation, not a defect in the Dockerfile, but **the actual containerized boot sequence (image build, `prisma migrate deploy` on start, app serving traffic from inside a container) has not been observed working.** Verify this on a real Docker host (e.g. the target Dokploy server) before relying on it.
 5. **Next.js 16 static-prerendering trap.** Pages that read live DB state with no dynamic route param (e.g. the dashboard root and Inbox) get silently statically prerendered at build time by default — their data would be frozen at the build's moment forever, never refreshed per request. Fixed here via `await connection()` from `next/server` before the query (see `src/app/(dashboard)/page.tsx` and `inbox/page.tsx`). Apply the same pattern to any future page that reads live data without a dynamic param; pages with a `[id]` segment were observed to opt into dynamic rendering automatically and don't need it.
